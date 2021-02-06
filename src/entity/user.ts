@@ -3,113 +3,113 @@ import Result from '../model/result';
 import { hash, compare } from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import {
-	Entity,
-	PrimaryGeneratedColumn,
-	Index,
-	Column,
-	CreateDateColumn,
-	UpdateDateColumn,
-	DeleteDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  Index,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  DeleteDateColumn
 } from 'typeorm';
+import { JWT, JWTActionType } from '../utils/jwt';
 
 @Entity('users')
 export default class User {
-	@PrimaryGeneratedColumn()
-	id: number;
+  @PrimaryGeneratedColumn()
+  id: number;
 
-	@Index({ unique: true })
-	@Column({ type: 'uuid', unique: true, nullable: false })
-	ukey: string;
+  @Index({ unique: true })
+  @Column({ type: 'uuid', unique: true, nullable: false })
+  ukey: string;
 
-	@Index({ unique: true })
-	@Column({ nullable: false, length: 50, unique: true })
-	email: string;
+  @Index({ unique: true })
+  @Column({ nullable: false, length: 50, unique: true })
+  email: string;
 
-	@Column({ nullable: false, length: 100 })
-	password: string;
+  @Column({ nullable: false, length: 100 })
+  password: string;
 
-	@Column({ nullable: false, default: false })
-	confirmed: boolean;
+  @Column({ nullable: false, default: false })
+  confirmed: boolean;
 
-	@CreateDateColumn({ name: 'created_at' })
-	createdAt: Date;
+  @Column({ name: 'refresh_index', nullable: false, default: 0 })
+  refreshIndex: number;
 
-	@UpdateDateColumn({ name: 'updated_at' })
-	updatedAt: Date;
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
 
-	@DeleteDateColumn({ name: 'deleted_at' })
-	deletedAt?: Date;
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
 
-	constructor(email: string, password: string) {
-		this.id = 0;
-		this.ukey = '';
-		this.email = email;
-		this.password = password;
-		this.confirmed = false;
-		this.createdAt = new Date();
-		this.updatedAt = new Date();
-	}
+  @DeleteDateColumn({ name: 'deleted_at' })
+  deletedAt?: Date;
 
-	static async getByUserKey(ukey: string): Promise<User | undefined> {
-		const db = new Database<User>(User);
-		return await db.get({ ukey });
-	}
+  constructor(email: string, password: string, refreshIndex: number) {
+    this.id = 0;
+    this.ukey = '';
+    this.email = email;
+    this.password = password;
+    this.refreshIndex = refreshIndex;
+    this.confirmed = false;
+    this.createdAt = new Date();
+    this.updatedAt = new Date();
+  }
 
-	static async getByEmail(email: string): Promise<User | undefined> {
-		const db = new Database<User>(User);
-		return await db.get({ email });
-	}
+  static async getByUserKey(ukey: string): Promise<User | undefined> {
+    const db = new Database<User>(User);
+    return await db.get({ ukey });
+  }
 
-	async save(): Promise<boolean> {
-		const db = new Database<User>(User);
-		return await db.save(this);
-	}
+  static async getByEmail(email: string): Promise<User | undefined> {
+    const db = new Database<User>(User);
+    return await db.get({ email });
+  }
 
-	static async register(
-		email: string,
-		password: string,
-		confirmation: string
-	): Promise<Result<User>> {
-		if (password != confirmation)
-			return new Result<User>(new Error('Passwords do not match'), 400);
+  async save(): Promise<boolean> {
+    const db = new Database<User>(User);
+    return await db.save(this);
+  }
 
-		const u = await User.getByEmail(email);
-		if (u != undefined) return new Result<User>(new Error('User exists'), 400);
+  static async register(email: string, password: string, confirmation: string): Promise<Result<User>> {
+    if (password != confirmation) return new Result<User>(new Error('Passwords do not match'), 400);
 
-		try {
-			const hpass = await hash(password, 12);
-			const user = new User(email, hpass);
-			user.ukey = uuidv4();
-			if (await user.save()) return new Result<User>(user, 201);
-			return new Result<User>(new Error('Registration failed'), 500);
-		} catch (err) {
-			console.log(err);
-			return new Result<User>(new Error('Registration failed'), 500);
-		}
-	}
+    const u = await User.getByEmail(email);
+    if (u != undefined) return new Result<User>(new Error('User exists'), 400);
 
-	static async login(email: string, password: string): Promise<Result<any>> {
-		const user = await User.getByEmail(email);
-		if (user == undefined)
-			return new Result<any>(new Error('Invalid credentials'), 400);
+    try {
+      const hpass = await hash(password, 12);
+      const user = new User(email, hpass, 0);
+      user.ukey = uuidv4();
+      if (await user.save()) return new Result<User>(user, 201);
+      return new Result<User>(new Error('Registration failed'), 500);
+    } catch (err) {
+      console.log(err);
+      return new Result<User>(new Error('Registration failed'), 500);
+    }
+  }
 
-		if (!user.confirmed)
-			return new Result<any>(new Error('User not confirmed'), 401);
+  static async login(email: string, password: string): Promise<Result<any>> {
+    const user = await User.getByEmail(email);
+    if (user == undefined) return new Result<any>(new Error('Invalid credentials'), 400);
 
-		try {
-			const valid = await compare(password, user.password);
-			if (valid) {
-				const accessToken = `access-token-${user.ukey}`;
-				return new Result<any>(
-					{ ukey: user.ukey, access_token: accessToken },
-					200
-				);
-			}
+    if (!user.confirmed) return new Result<any>(new Error('User not confirmed'), 401);
 
-			return new Result<any>(new Error('Invalid credentials'), 400);
-		} catch (err) {
-			console.log(err);
-			return new Result<any>(new Error('Login failed'), 500);
-		}
-	}
+    try {
+      const valid = await compare(password, user.password);
+      if (valid) {
+        const accessToken = JWT.encode(user.ukey, user.refreshIndex, JWTActionType.userAccess);
+        const refreshToken = JWT.encode(user.ukey, user.refreshIndex, JWTActionType.refreshAccess);
+        if (accessToken == undefined || refreshToken == undefined) {
+          return new Result<any>(new Error('Login Failed'), 401);
+        }
+
+        return new Result<any>({ ukey: user.ukey, refresh_token: refreshToken, access_token: accessToken }, 200);
+      }
+
+      return new Result<any>(new Error('Invalid credentials'), 400);
+    } catch (err) {
+      console.log(err);
+      return new Result<any>(new Error('Login failed'), 500);
+    }
+  }
 }
