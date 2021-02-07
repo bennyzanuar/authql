@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "nodemon src/app.ts",
     "build": "tsc -p .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "migrate": "ts-node ./node_modules/typeorm/cli.js migration:run",
+    "revert": "ts-node ./node_modules/typeorm/cli.js migration:revert",
+    "initdb": "dropdb db_authql; createdb -E UTF8 db_authql;"
   },
   "author": "Benny Zanuarwan",
   "license": "ISC",
